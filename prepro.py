@@ -12,10 +12,15 @@ This script reads this json, does some basic preprocessing on the captions
 Output: a json file and an hdf5 file
 The hdf5 file contains several fields:
 /images is (N,3,256,256) uint8 array of raw image data in RGB format
+--图片数 * rgb * 256 * 256
 /labels is (M,max_length) uint32 array of encoded labels, zero padded
+--每幅图片可能有若干个句子描述，若使用S1表示图片1对应的描述句子个数，那么
+M = sigma(p=1->N)(Sp)
 /label_start_ix and /label_end_ix are (N,) uint32 arrays of pointers to the 
   first and last indices (in range 1..M) of labels for each image
+--标记每幅图片对应的描述句子在M的范围
 /label_length stores the length of the sequence for each of the M sequences
+--M内每个句子的长度
 
 The json file has a dict that contains:
 - an 'ix_to_word' field storing the vocab in form {ix:'word'}, where ix is 1-indexed
