@@ -44,8 +44,10 @@ def prepro_captions(imgs):
   print 'example processed tokens:'
   for i,img in enumerate(imgs):
     img['processed_tokens'] = []
-    for j,s in enumerate(img['captions']):
+    for j,s in enumerate(img['captions']): # img['captions']是字符串数组 [s,s,s,s]
+      # 去标点，分词(提取token)
       txt = str(s).lower().translate(None, string.punctuation).strip().split()
+      # img['processed_tokens']是一个list[list]例如[[w,w,w,w],[w,w,w]]
       img['processed_tokens'].append(txt)
       if i < 10 and j == 0: print txt
 
@@ -53,6 +55,7 @@ def build_vocab(imgs, params):
   count_thr = params['word_count_threshold']
 
   # count up the number of words
+  # map(token-count)
   counts = {}
   for img in imgs:
     for txt in img['processed_tokens']:
@@ -73,6 +76,7 @@ def build_vocab(imgs, params):
   print 'number of UNKs: %d/%d = %.2f%%' % (bad_count, total_words, bad_count*100.0/total_words)
 
   # lets look at the distribution of lengths as well
+  # map(sentenc_len-occur_times)
   sent_lengths = {}
   for img in imgs:
     for txt in img['processed_tokens']:
@@ -91,12 +95,15 @@ def build_vocab(imgs, params):
     print 'inserting the special UNK token'
     vocab.append('UNK')
   
+  # 针对img['processed_tokens']，小于threshold的token转成UNK token，保存到img['final_captions']
+  # 所以img['final_captions']也是一个list[list]例如[[UNK,w,w,w],[w,UNK,w]]
   for img in imgs:
     img['final_captions'] = []
     for txt in img['processed_tokens']:
       caption = [w if counts.get(w,0) > count_thr else 'UNK' for w in txt]
       img['final_captions'].append(caption)
 
+  # 返回数量大于threshold的token list
   return vocab
 
 def assign_splits(imgs, params):
@@ -123,6 +130,9 @@ def encode_captions(imgs, params, wtoi):
 
   max_length = params['max_length']
   N = len(imgs)
+  # 每幅图片可能有若干个句子描述，若使用S1表示图片1对应的描述句子个数，那么
+  # M = sigma(p=1->N)(Sp)
+  # 注意，img['final_captions']是一个list[list]
   M = sum(len(img['final_captions']) for img in imgs) # total number of captions
 
   label_arrays = []
@@ -133,10 +143,13 @@ def encode_captions(imgs, params, wtoi):
   counter = 1
   for i,img in enumerate(imgs):
     n = len(img['final_captions'])
+    # n是每张图片对应的描述句子的个数
     assert n > 0, 'error: some image has no captions'
-
+    
     Li = np.zeros((n, max_length), dtype='uint32')
+    # Li是n行max_length列数组，Li[a][b]表示对应图片的第a个描述句子第b个词在vocab内的索引
     for j,s in enumerate(img['final_captions']):
+      # s图片对应的描述句子
       label_length[caption_counter] = min(max_length, len(s)) # record the length of this sequence
       caption_counter += 1
       for k,w in enumerate(s):
@@ -144,6 +157,10 @@ def encode_captions(imgs, params, wtoi):
           Li[j,k] = wtoi[w]
 
     # note: word indices are 1-indexed, and captions are padded with zeros
+    # label_arrays是li的list
+    # 例如
+    # [[[w,w,w],[w,w,w]],
+    #  [[w,w,w],[w,w,w]]]，label_array[i][j][k]对应第i张图片第j个句子第k个词在vocab的索引
     label_arrays.append(Li)
     label_start_ix[i] = counter
     label_end_ix[i] = counter + n - 1
@@ -151,6 +168,7 @@ def encode_captions(imgs, params, wtoi):
     counter += n
   
   L = np.concatenate(label_arrays, axis=0) # put all the labels together
+  # 所以L就是[[w,w,w],[w,w,w],[w,w,w],[w,w,w]]
   assert L.shape[0] == M, 'lengths don\'t match? that\'s weird'
   assert np.all(label_length > 0), 'error: some caption had no words?'
 
@@ -164,17 +182,27 @@ def main(params):
   shuffle(imgs) # shuffle the order
 
   # tokenization and preprocessing
+  # 去标点，分词(提取token)，保存到对应图片的['processed_tokens']，例如image1['processed_tokens']
+  # img['processed_tokens']是一个list[list]例如[[w,w,w,w],[w,w,w]]
   prepro_captions(imgs)
 
   # create the vocab
+  # 针对img['processed_tokens']，小于threshold的token转成UNK token，img的token经UNK转换后(如果有)保存到img['final_captions']
+  # 所以img['final_captions']也是一个list[list]例如[[UNK,w,w,w],[w,UNK,w]]
+  # 返回数量大于threshold的token list
   vocab = build_vocab(imgs, params)
+  # map(index-token)
   itow = {i+1:w for i,w in enumerate(vocab)} # a 1-indexed vocab translation table
+  # map(token-index)
   wtoi = {w:i+1 for i,w in enumerate(vocab)} # inverse table
 
   # assign the splits
+  # split train_set test_set validation_set
   assign_splits(imgs, params)
   
   # encode captions in large arrays, ready to ship to hdf5 file
+  # 所以第i张图片第j个句子第k个词在vocab的索引表示为
+  # L[label_start_ix[i] + j][k]
   L, label_start_ix, label_end_ix, label_length = encode_captions(imgs, params, wtoi)
 
   # create output h5 file
