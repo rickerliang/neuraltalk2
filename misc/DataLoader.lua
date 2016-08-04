@@ -8,6 +8,7 @@ function DataLoader:__init(opt)
   -- load the json file which contains additional information about the dataset
   print('DataLoader loading json file: ', opt.json_file)
   self.info = utils.read_json(opt.json_file)
+  -- json文件保存的 map(index-token)
   self.ix_to_word = self.info.ix_to_word
   self.vocab_size = utils.count_keys(self.ix_to_word)
   print('vocab size is ' .. self.vocab_size)
@@ -18,6 +19,7 @@ function DataLoader:__init(opt)
   
   -- extract image size from dataset
   local images_size = self.h5_file:read('/images'):dataspaceSize()
+  -- f.create_dataset("images", (N,3,256,256), dtype='uint8') # space for resized images
   assert(#images_size == 4, '/images should be a 4D tensor')
   assert(images_size[3] == images_size[4], 'width and height must match')
   self.num_images = images_size[1]
@@ -28,6 +30,8 @@ function DataLoader:__init(opt)
 
   -- load in the sequence data
   local seq_size = self.h5_file:read('/labels'):dataspaceSize()
+  -- 所以第i张图片第j个句子第k个词在vocab的索引表示为 L[label_start_ix[i] + j][k]
+  -- 获取句子长度
   self.seq_length = seq_size[2]
   print('max sequence length in data is ' .. self.seq_length)
   -- load the pointers in full to RAM (should be small enough)
@@ -39,8 +43,10 @@ function DataLoader:__init(opt)
   self.iterators = {}
   for i,img in pairs(self.info.images) do
     local split = img.split
+    -- split == 'val' or 'test' or 'train'
     if not self.split_ix[split] then
       -- initialize new split
+      -- 例如 self.split_ix['val'][10]
       self.split_ix[split] = {}
       self.iterators[split] = 1
     end
@@ -114,6 +120,7 @@ function DataLoader:getBatch(opt)
       seq = torch.LongTensor(seq_per_img, self.seq_length)
       for q=1, seq_per_img do
         local ixl = torch.random(ix1,ix2)
+        -- seq[{{q,q},{}}] 从第q行到第q行，所有列
         seq[{ {q,q} }] = self.h5_file:read('/labels'):partial({ixl, ixl}, {1,self.seq_length})
       end
     else
@@ -132,8 +139,10 @@ function DataLoader:getBatch(opt)
   end
 
   local data = {}
-  data.images = img_batch_raw
+  data.images = img_batch_raw -- tensor(N,3,256,256)
+  -- tensor(seq_len, seq_per_img)
   data.labels = label_batch:transpose(1,2):contiguous() -- note: make label sequences go down as columns
+  -- current split pos, split len, wrapped
   data.bounds = {it_pos_now = self.iterators[split], it_max = #split_ix, wrapped = wrapped}
   data.infos = infos
   return data
